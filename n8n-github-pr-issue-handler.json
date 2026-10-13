@@ -1,0 +1,370 @@
+{
+  "name": "GitHub PR & Issue Handler",
+  "nodes": [
+    {
+      "parameters": {
+        "authentication": "accessToken",
+        "owner": {
+          "mode": "list",
+          "value": "DEIN-GITHUB-USERNAME"
+        },
+        "repository": {
+          "mode": "list",
+          "value": "DEIN-REPO-NAME"
+        },
+        "events": [
+          "issues",
+          "pull_request"
+        ]
+      },
+      "id": "github-trigger",
+      "name": "GitHub Trigger",
+      "type": "n8n-nodes-base.githubTrigger",
+      "typeVersion": 1,
+      "position": [
+        200,
+        400
+      ],
+      "credentials": {
+        "githubApi": {
+          "id": "DEINE-GITHUB-CREDENTIAL-ID",
+          "name": "GitHub API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "action-check",
+              "leftValue": "={{ $json.body.action }}",
+              "rightValue": "opened",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-opened",
+      "name": "Nur bei opened",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        420,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "id": "is-issue",
+                    "leftValue": "={{ $json.body.issue }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "object",
+                      "operation": "exists",
+                      "singleValue": true
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "id": "is-pr",
+                    "leftValue": "={{ $json.body.pull_request }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "object",
+                      "operation": "exists",
+                      "singleValue": true
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "switch-type",
+      "name": "Issue oder PR?",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [
+        640,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Auto-Labeling für Issues basierend auf Titel\nconst title = ($input.first().json.body.issue?.title || '').toLowerCase();\n\nlet labels = ['needs-triage'];\n\nif (title.includes('bug') || title.includes('error') || title.includes('crash') || title.includes('broken') || title.includes('fehler')) {\n  labels = ['bug'];\n} else if (title.includes('feature') || title.includes('enhancement') || title.includes('add') || title.includes('implement') || title.includes('neue')) {\n  labels = ['enhancement'];\n} else if (title.includes('question') || title.includes('help') || title.includes('how') || title.includes('frage') || title.includes('hilfe')) {\n  labels = ['question'];\n} else if (title.includes('doc') || title.includes('readme') || title.includes('doku')) {\n  labels = ['documentation'];\n}\n\nreturn [{\n  json: {\n    labels: labels,\n    issueNumber: $input.first().json.body.issue.number,\n    owner: $input.first().json.body.repository.owner.login,\n    repo: $input.first().json.body.repository.name,\n    title: $input.first().json.body.issue.title,\n    url: $input.first().json.body.issue.html_url\n  }\n}];"
+      },
+      "id": "code-issue-labels",
+      "name": "Issue Labels erkennen",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        860,
+        280
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "accessToken",
+        "resource": "issue",
+        "operation": "edit",
+        "owner": "={{ $json.owner }}",
+        "repository": "={{ $json.repo }}",
+        "issueNumber": "={{ $json.issueNumber }}",
+        "labels": "={{ $json.labels }}"
+      },
+      "id": "github-add-issue-labels",
+      "name": "Issue Labels setzen",
+      "type": "n8n-nodes-base.github",
+      "typeVersion": 1,
+      "position": [
+        1080,
+        280
+      ],
+      "credentials": {
+        "githubApi": {
+          "id": "DEINE-GITHUB-CREDENTIAL-ID",
+          "name": "GitHub API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "authentication": "accessToken",
+        "resource": "issue",
+        "operation": "createComment",
+        "owner": "={{ $json.owner }}",
+        "repository": "={{ $json.repo }}",
+        "issueNumber": "={{ $json.issueNumber }}",
+        "body": "=## Automatische Klassifizierung\n\nDieses Issue wurde automatisch mit dem Label **{{ $json.labels.join(', ') }}** versehen.\n\n---\n*Generiert von n8n*"
+      },
+      "id": "github-issue-comment",
+      "name": "Issue Kommentar",
+      "type": "n8n-nodes-base.github",
+      "typeVersion": 1,
+      "position": [
+        1300,
+        280
+      ],
+      "credentials": {
+        "githubApi": {
+          "id": "DEINE-GITHUB-CREDENTIAL-ID",
+          "name": "GitHub API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Daten für PR vorbereiten\nconst pr = $input.first().json.body.pull_request;\n\nreturn [{\n  json: {\n    prNumber: pr.number,\n    owner: $input.first().json.body.repository.owner.login,\n    repo: $input.first().json.body.repository.name,\n    title: pr.title,\n    url: pr.html_url,\n    author: pr.user.login\n  }\n}];"
+      },
+      "id": "code-pr-data",
+      "name": "PR Daten vorbereiten",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        860,
+        520
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "accessToken",
+        "resource": "issue",
+        "operation": "edit",
+        "owner": "={{ $json.owner }}",
+        "repository": "={{ $json.repo }}",
+        "issueNumber": "={{ $json.prNumber }}",
+        "labels": [
+          "needs-review"
+        ]
+      },
+      "id": "github-add-pr-label",
+      "name": "PR Label needs-review",
+      "type": "n8n-nodes-base.github",
+      "typeVersion": 1,
+      "position": [
+        1080,
+        520
+      ],
+      "credentials": {
+        "githubApi": {
+          "id": "DEINE-GITHUB-CREDENTIAL-ID",
+          "name": "GitHub API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "authentication": "accessToken",
+        "resource": "issue",
+        "operation": "createComment",
+        "owner": "={{ $json.owner }}",
+        "repository": "={{ $json.repo }}",
+        "issueNumber": "={{ $json.prNumber }}",
+        "body": "=## Pull Request Checkliste\n\nHallo @{{ $json.author }} 👋\n\nDanke für deinen PR! Bitte stelle sicher, dass folgendes erledigt ist:\n\n- [ ] Code ist getestet\n- [ ] Dokumentation aktualisiert (falls nötig)\n- [ ] Keine Secrets committed\n- [ ] CI-Checks sind grün\n\n---\n*Automatisch generiert von n8n*"
+      },
+      "id": "github-pr-comment",
+      "name": "PR Kommentar mit Checkliste",
+      "type": "n8n-nodes-base.github",
+      "typeVersion": 1,
+      "position": [
+        1300,
+        520
+      ],
+      "credentials": {
+        "githubApi": {
+          "id": "DEINE-GITHUB-CREDENTIAL-ID",
+          "name": "GitHub API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Setup-Anleitung\n\n1. **GitHub Credential anlegen** (Personal Access Token Classic mit Scopes: `repo`, `admin:repo_hook`)\n2. In den Nodes **Owner** und **Repository** anpassen\n3. Credential in allen GitHub-Nodes auswählen\n4. Workflow aktivieren → n8n erstellt automatisch den Webhook\n5. Labels im Repo anlegen: `bug`, `enhancement`, `question`, `documentation`, `needs-triage`, `needs-review`",
+        "height": 280,
+        "width": 400
+      },
+      "id": "sticky-setup",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        200,
+        80
+      ]
+    }
+  ],
+  "connections": {
+    "GitHub Trigger": {
+      "main": [
+        [
+          {
+            "node": "Nur bei opened",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Nur bei opened": {
+      "main": [
+        [
+          {
+            "node": "Issue oder PR?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Issue oder PR?": {
+      "main": [
+        [
+          {
+            "node": "Issue Labels erkennen",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "PR Daten vorbereiten",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Issue Labels erkennen": {
+      "main": [
+        [
+          {
+            "node": "Issue Labels setzen",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Issue Labels setzen": {
+      "main": [
+        [
+          {
+            "node": "Issue Kommentar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PR Daten vorbereiten": {
+      "main": [
+        [
+          {
+            "node": "PR Label needs-review",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PR Label needs-review": {
+      "main": [
+        [
+          {
+            "node": "PR Kommentar mit Checkliste",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "n8n-github-pr-issue-handler"
+  }
+}
